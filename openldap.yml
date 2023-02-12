@@ -1,0 +1,73 @@
+---
+- name: Install and configure OpenLDAP server
+  hosts: all
+  become: true
+
+  vars:
+    admin_password: mypassword
+    domain: example.com
+    organization: My Organization
+    users:
+      - username: alice
+        password: alice123
+        firstname: Alice
+        lastname: Smith
+        group: developers
+      - username: bob
+        password: bob123
+        firstname: Bob
+        lastname: Johnson
+        group: testers
+    groups:
+      - name: developers
+        gid: 1001
+      - name: testers
+        gid: 1002
+
+  tasks:
+    - name: Install OpenLDAP server
+      apt:
+        name: slapd
+        state: present
+
+    - name: Set admin password in LDAP
+      ldap_passwd:
+        dn: cn=admin,{{ ldap_suffix }}
+        password: "{{ admin_password }}"
+
+    - name: Set domain and organization in LDAP
+      ldap_attr:
+        dn: "{{ ldap_suffix }}"
+        name: dc
+        attributes: ['{{ domain.split(".")|join(",dc=") }}']
+        state: present
+      ldap_attr:
+        dn: "{{ ldap_suffix }}"
+        name: o
+        attributes: "{{ organization }}"
+        state: present
+
+    - name: Add users to LDAP
+      ldap_entry:
+        dn: "uid={{ item.username }},{{ ldap_suffix }}"
+        objectClass: ['top', 'account', 'posixAccount', 'shadowAccount']
+        attributes:
+          cn: "{{ item.firstname }} {{ item.lastname }}"
+          uid: "{{ item.username }}"
+          uidNumber: "{{ loop.index + 1000 }}"
+          gidNumber: "{{ groups[item.group].gid }}"
+          homeDirectory: "/home/{{ item.username }}"
+          loginShell: "/bin/bash"
+          userPassword: "{crypt}{{ item.password|password_hash('sha512') }}"
+        state: present
+      loop: "{{ users }}"
+
+    - name: Add groups to LDAP
+      ldap_entry:
+        dn: "cn={{ item.name }},{{ ldap_suffix }}"
+        objectClass: ['top', 'posixGroup']
+        attributes:
+          cn: "{{ item.name }}"
+          gidNumber: "{{ item.gid }}"
+        state: present
+      loop: "{{ groups }}"
